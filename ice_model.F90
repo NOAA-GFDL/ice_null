@@ -26,6 +26,10 @@ module ice_model_mod
   public :: update_ice_model_slow_up
   public :: update_ice_model_slow_dn
   public :: ice_model_restart
+  public :: ocn_ice_bnd_type_chksum
+  public :: atm_ice_bnd_type_chksum
+  public :: lnd_ice_bnd_type_chksum
+  public :: ice_data_type_chksum
 
   !
   ! the following four types are for data exchange with the new coupler
@@ -505,5 +509,33 @@ contains
     deallocate(Ice % flux_sw_nir_dir, Ice % flux_sw_nir_dif )
 
   end subroutine ice_model_end
+
+  subroutine ocn_ice_bnd_type_chksum(id, timestep, Ocean_ice_boundary)
+    character(len=*), intent(in) :: id
+    integer         , intent(in) :: timestep
+    type(ocean_ice_boundary_type), intent(in) :: Ocean_ice_boundary
+    return
+  end subroutine ocn_ice_bnd_type_chksum
+
+  subroutine atm_ice_bnd_type_chksum(id, timestep, Atmos_ice_boundary)
+    character(len=*), intent(in) :: id
+    integer         , intent(in) :: timestep
+    type(atmos_ice_boundary_type), intent(in) :: Atmos_ice_boundary
+    return
+  end subroutine atm_ice_bnd_type_chksum
+
+  subroutine lnd_ice_bnd_type_chksum(id, timestep, Land_ice_boundary)
+    character(len=*), intent(in) :: id
+    integer         , intent(in) :: timestep
+    type(land_ice_boundary_type), intent(in) :: Land_ice_boundary
+    return
+  end subroutine lnd_ice_bnd_type_chksum
+
+  subroutine ice_data_type_chksum(id, timestep, Ice_data)
+    character(len=*), intent(in) :: id
+    integer         , intent(in) :: timestep
+    type(ice_data_type), intent(in) :: Ice_data
+    return
+  end subroutine ice_data_type_chksum
 
 end module ice_model_mod
