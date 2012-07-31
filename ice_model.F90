@@ -111,6 +111,10 @@ module ice_model_mod
      real,    pointer, dimension(:,:)   :: qflx_lim_ice        =>NULL()
      real,    pointer, dimension(:,:)   :: qflx_res_ice        =>NULL()
      real,    pointer, dimension(:,:)   :: area                =>NULL()
+     real,    pointer, dimension(:,:)   :: mi                  =>NULL() ! This is needed for the wave model. It is introduced here,
+                                                                        ! because flux_ice_to_ocean cannot handle 3D fields. This may be
+                                                                        ! removed, if the information on ice thickness can be derived from
+                                                                        ! eventually from h_ice outside the ice module.
      logical, pointer, dimension(:,:)   :: maskmap             =>NULL() ! A pointer to an array indicating which
                                                                         ! logical processors are actually used for
                                                                         ! the ocean code. The other logical
@@ -210,6 +214,31 @@ module ice_model_mod
   integer :: layout(2)          = (/0, 0/)
   integer :: io_layout(2)       = (/0, 0/)
 
+  real    :: channel_viscosity  = 0.     ! viscosity used in one-cell wide channels to parameterize transport (m^2/s)
+  real    :: smag_ocn           = 0.15   ! Smagorinksy coefficient for viscosity (dimensionless)
+  real    :: ssh_gravity        = 9.81   ! Gravity parameter used in channel viscosity parameterization (m/s^2)
+  real    :: chan_cfl_limit     = 0.25   ! CFL limit for channel viscosity parameterization (dimensionless)
+  logical :: do_sun_angle_for_alb = .false.! find the sun angle for ocean albed in the frame of the ice model
+  ! mask_table contains information for masking domain ( n_mask, layout and mask_list).
+  !   A text file to specify n_mask, layout and mask_list to reduce number of processor
+  !   usage by masking out some domain regions which contain all land points.
+  !   The default file name of mask_table is "INPUT/ice_mask_table". Please note that
+  !   the file name must begin with "INPUT/". The first
+  !   line of mask_table will be number of region to be masked out. The second line
+  !   of the mask_table will be the layout of the model. User need to set ice_model_nml
+  !   variable layout to be the same as the second line of the mask table.
+  !   The following n_mask line will be the position of the processor to be masked out.
+  !   The mask_table could be created by tools check_mask.
+  !   For example the mask_table will be as following if n_mask=2, layout=4,6 and
+  !   the processor (1,2) and (3,6) will be masked out.
+  !     2
+  !     4,6
+  !     1,2
+  !     3,6
+
+  character(len=128) :: mask_table = "INPUT/ice_mask_table"
+
+
   namelist /ice_model_nml/ mom_rough_ice, heat_rough_ice, p0, c0, cdw, wd_turn,  &
                            kmelt, alb_sno, alb_ice, pen_ice, opt_dep_ice,        &
                            nsteps_dyn, nsteps_adv, num_part, atmos_winds,        &
@@ -217,7 +246,10 @@ module ice_model_mod
                            do_ice_restore, do_ice_limit, max_ice_limit,          &
                            ice_restore_timescale, slp2ocean, conservation_check, &
                            t_range_melt, cm2_bugs, ks, h_lo_lim, verbose,        &
-                           do_icebergs, add_diurnal_sw, io_layout
+                           do_icebergs, add_diurnal_sw, io_layout, channel_viscosity,&
+                           smag_ocn, ssh_gravity, chan_cfl_limit, do_sun_angle_for_alb, &
+                           mask_table
+
 
 contains
 
@@ -322,6 +354,8 @@ contains
                Ice % t_ice1 (isd:ied, jsd:jed, 2:km), Ice % t_ice2 (isd:ied, jsd:jed, 2:km)   )
     allocate ( Ice % qflx_lim_ice  (isc:iec, jsc:jec) , Ice % qflx_res_ice  (isc:iec, jsc:jec)   )
     allocate ( Ice % area          (isc:iec, jsc:jec) )
+    allocate ( Ice % mi            (isc:iec, jsc:jec) )
+
 
     Ice % flux_sw_vis_dir = 0.
     Ice % flux_sw_vis_dif = 0.
@@ -358,6 +392,7 @@ contains
     Ice % h_ice           = 0.
     Ice % t_ice1          =-5.
     Ice % t_ice2          =-5.
+    Ice % mi              = 0.
     Ice % area            = cell_area * 4*PI*RADIUS*RADIUS
 
     do j = jsc, jec
