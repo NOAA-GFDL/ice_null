@@ -513,7 +513,8 @@ contains
     return
   end subroutine ice_stock_pe
 
-  subroutine ice_model_restart(time_stamp)
+  subroutine ice_model_restart(Ice, time_stamp)
+    type (ice_data_type),     intent(inout), optional :: Ice
     character(len=*), intent(in), optional :: time_stamp
 
     return
