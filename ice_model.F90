@@ -1,6 +1,6 @@
 module ice_model_mod
 
-  use mpp_domains_mod,  only: mpp_update_domains, domain2D
+  use mpp_domains_mod,  only: mpp_update_domains, domain2D, BGRID_NE
   use fms_mod,          only: error_mesg, open_namelist_file, stdlog, check_nml_error, close_file
   use time_manager_mod, only: time_type, get_time
   use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
@@ -126,6 +126,7 @@ module ice_model_mod
      type(coupler_3d_bc_type)           :: ocean_fields       ! array of fields used for additional tracers
      type(coupler_2d_bc_type)           :: ocean_fluxes       ! array of fluxes used for additional tracers
      type(coupler_3d_bc_type)           :: ocean_fluxes_top   ! array of fluxes for averaging
+     integer                            :: flux_uv_stagger = -999 ! The staggering parameter needed for coupling SIS2 only, unused here
   end type ice_data_type
   type :: ocean_ice_boundary_type
      real, dimension(:,:),   pointer :: u         =>NULL()
@@ -137,6 +138,7 @@ module ice_model_mod
      real, dimension(:,:,:), pointer :: data      =>NULL() ! collective field for "named" fields above
      integer                         :: xtype              ! REGRID, REDIST or DIRECT used by coupler
      type(coupler_2d_bc_type)        :: fields     ! array of fields used for additional tracers
+     integer                         :: stagger = BGRID_NE !Needed only for coupling SIS2
   end type 
 
   type :: atmos_ice_boundary_type 
