@@ -155,6 +155,9 @@ type ice_data_type
                                            p_surf =>NULL(), &
                                            runoff =>NULL(), &
                                            calving =>NULL(), &
+                                           ustar_berg =>NULL(), &
+                                           area_berg =>NULL(), &
+                                           mass_berg =>NULL(), &
                                            runoff_hflx =>NULL(), &
                                            calving_hflx =>NULL(), &
                                            area =>NULL(), &
@@ -208,6 +211,10 @@ type :: atmos_ice_boundary_type
                                      sw_flux_vis_dif =>NULL(), &
                                      sw_flux_nir_dir =>NULL(), &
                                      sw_flux_nir_dif =>NULL(), &
+                                     sw_down_vis_dir =>NULL(), &
+                                     sw_down_vis_dif =>NULL(), &
+                                     sw_down_nir_dir =>NULL(), &
+                                     sw_down_nir_dif =>NULL(), &
                                      lprec =>NULL(), &
                                      fprec =>NULL()
   real, dimension(:,:,:), pointer :: dhdt =>NULL(), &
@@ -295,10 +302,13 @@ type(restart_file_type), save :: Ice_restart
 contains
 
 !=============================================================================================
-  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler )
+  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice )
     type(ice_data_type), intent(inout) :: Ice
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
+    logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
+                                                          ! there is no difference between fast and
+                                                          ! slow ice PEs.
 
     real, allocatable, dimension(:,:)   :: lonv, latv, rmask
     real, allocatable, dimension(:)     :: glon, glat
