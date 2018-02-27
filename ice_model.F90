@@ -1,3 +1,23 @@
+!***********************************************************************
+!*                   GNU Lesser General Public License
+!*
+!* This file is part of the GFDL Ice Null Model Component.
+!*
+!* Ice Null is free software: you can redistribute it and/or modify it
+!* under the terms of the GNU Lesser General Public License as published
+!* by the Free Software Foundation, either version 3 of the License, or
+!* (at your option) any later version.
+!*
+!* Ice Null is distributed in the hope that it will be useful, but
+!* WITHOUT ANY WARRANTY; without even the implied warranty of
+!* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+!* General Public License for more details.
+!*
+!* You should have received a copy of the GNU Lesser General Public
+!* License along with Ice Null.
+!* If not, see <http://www.gnu.org/licenses/>.
+!***********************************************************************
+
 module ice_model_mod
 
 use   ice_albedo_mod, only:  ice_albedo_init, ice_albedo
@@ -135,6 +155,9 @@ type ice_data_type
                                            p_surf =>NULL(), &
                                            runoff =>NULL(), &
                                            calving =>NULL(), &
+                                           ustar_berg =>NULL(), &
+                                           area_berg =>NULL(), &
+                                           mass_berg =>NULL(), &
                                            runoff_hflx =>NULL(), &
                                            calving_hflx =>NULL(), &
                                            area =>NULL(), &
@@ -188,6 +211,10 @@ type :: atmos_ice_boundary_type
                                      sw_flux_vis_dif =>NULL(), &
                                      sw_flux_nir_dir =>NULL(), &
                                      sw_flux_nir_dif =>NULL(), &
+                                     sw_down_vis_dir =>NULL(), &
+                                     sw_down_vis_dif =>NULL(), &
+                                     sw_down_nir_dir =>NULL(), &
+                                     sw_down_nir_dif =>NULL(), &
                                      lprec =>NULL(), &
                                      fprec =>NULL()
   real, dimension(:,:,:), pointer :: dhdt =>NULL(), &
@@ -275,10 +302,13 @@ type(restart_file_type), save :: Ice_restart
 contains
 
 !=============================================================================================
-  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler )
+  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice )
     type(ice_data_type), intent(inout) :: Ice
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
+    logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
+                                                          ! there is no difference between fast and
+                                                          ! slow ice PEs.
 
     real, allocatable, dimension(:,:)   :: lonv, latv, rmask
     real, allocatable, dimension(:)     :: glon, glat
