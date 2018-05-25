@@ -74,7 +74,9 @@ public :: ice_data_type, ocean_ice_boundary_type,               &
           unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, &
           set_ice_surface_fields, ice_model_fast_cleanup, &
           unpack_land_ice_boundary, update_ice_model_slow, &
-          exchange_fast_to_slow_ice
+          exchange_fast_to_slow_ice,update_ice_model_slow_up, &
+          update_ice_model_slow_dn, share_ice_domains
+
 
 type ice_data_type
   type(domain2d)                        :: Domain
