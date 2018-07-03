@@ -64,19 +64,30 @@ use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
 implicit none
 private
 
-public :: ice_data_type, ocean_ice_boundary_type,               &
-          atmos_ice_boundary_type, land_ice_boundary_type,      &
-          ice_model_init, ice_model_end, update_ice_model_fast, &
-          ice_stock_pe, cell_area, ice_model_restart,           &
-          ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum, &
-          lnd_ice_bnd_type_chksum, ice_data_type_chksum, &
-          update_ice_atm_deposition_flux, share_ice_domains, &
-          unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, &
-          set_ice_surface_fields, ice_model_fast_cleanup, &
-          unpack_land_ice_boundary, update_ice_model_slow, &
-          exchange_fast_to_slow_ice,update_ice_model_slow_up, &
-          update_ice_model_slow_dn, share_ice_domains
+!public :: ice_data_type, ocean_ice_boundary_type,               &
+!          atmos_ice_boundary_type, land_ice_boundary_type,      &
+!          ice_model_init, ice_model_end, update_ice_model_fast, &
+!          ice_stock_pe, cell_area, ice_model_restart,           &
+!
+!          ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum, &
+!          lnd_ice_bnd_type_chksum, ice_data_type_chksum, &
+!
+!          update_ice_atm_deposition_flux, share_ice_domains, &
+!          unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, &
+!          set_ice_surface_fields, ice_model_fast_cleanup, &
+!          unpack_land_ice_boundary, update_ice_model_slow, &
+!          exchange_fast_to_slow_ice
 
+public :: ice_data_type, ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
+public :: ice_model_init, ice_model_end, update_ice_model_fast, ice_stock_pe, cell_area
+public ::  share_ice_domains
+public :: ice_model_restart 
+public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
+public :: lnd_ice_bnd_type_chksum, ice_data_type_chksum
+public :: update_ice_atm_deposition_flux, share_ice_domains
+public :: unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, set_ice_surface_fields
+public :: ice_model_fast_cleanup, unpack_land_ice_boundary
+public :: exchange_fast_to_slow_ice, update_ice_model_slow
 
 type ice_data_type
   type(domain2d)                        :: Domain
@@ -300,6 +311,11 @@ real, allocatable, dimension(:,:) ::  cell_area  ! grid cell area; sphere frac.
 integer :: id_restart_albedo
 integer :: mlon, mlat, npart ! global grid size
 type(restart_file_type), save :: Ice_restart
+
+! interface for fast ice for compatibility with SIS2 
+interface update_ice_model_fast ! overload to support old interface
+     module procedure update_ice_model_fast_new
+end interface
 
 contains
 
@@ -704,12 +720,12 @@ endif
 
   end subroutine ice_model_init
 !=============================================================================================
-subroutine update_ice_model_fast( Atmos_boundary, Ice )
-type(atmos_ice_boundary_type), intent(in) :: Atmos_boundary
+subroutine update_ice_model_fast_old( Ice,Atmos_boundary, )
 type (ice_data_type), intent(inout) :: Ice
+type(atmos_ice_boundary_type), intent(in) :: Atmos_boundary
 
 return
-end subroutine update_ice_model_fast
+end subroutine update_ice_model_fast_old
 !=============================================================================================
 
 subroutine unpack_ocean_ice_boundary(Ocean_boundary, Ice)
@@ -832,6 +848,23 @@ end subroutine ice_model_fast_cleanup
 subroutine unpack_land_ice_boundary(Ice, LIB)
   type(ice_data_type),          intent(inout) :: Ice ! The publicly visible ice data type.
   type(land_ice_boundary_type), intent(in)    :: LIB ! The land ice boundary type that is being unpacked.
+!=============================================================================================
+!\brief new coupler interface to do fast ice processes
+!\note the update_ice_model_fast_old routine is different from the one in ice_sis
+! However, the interface is the same in both versions of ice_model.F90.
+ subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
+   type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
+   type (ice_data_type),          intent(inout) :: Ice
+   call mpp_clock_begin(iceClock)
+   call mpp_clock_begin(iceClock3)
+
+   call update_ice_model_fast_old (Ice,Atmos_boundary)
+
+   call mpp_clock_end(iceClock3)
+   call mpp_clock_end(iceClock)
+
+ end subroutine update_ice_model_fast_new
+
 
 ! logical :: sent
 ! integer :: i, j, i_off, j_off
