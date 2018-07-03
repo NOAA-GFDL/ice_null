@@ -740,7 +740,7 @@ subroutine update_ice_model_slow( Ice, runoff, calving, runoff_hflx, calving_hfl
 type(ice_data_type),           intent(inout) :: Ice
 real, dimension(:,:), intent(in), optional :: runoff, calving
 real, dimension(:,:), intent(in), optional :: runoff_hflx, calving_hflx
-real, dimension(:,:,:),           intent(in), optional :: p_surf
+real, dimension(:,:),           intent(in), optional :: p_surf
 
 return
 end subroutine update_ice_model_slow
@@ -946,7 +946,7 @@ subroutine update_ice_model_slow_dn ( Atmos_boundary, Land_boundary, Ice )
 
     call unpack_land_ice_boundary( Ice, Land_boundary )
 
-    call update_ice_model_slow (Ice, Ice%runoff, Ice%calving, Ice%runoff_hflx, Ice%calving_hflx, Ice%p_surf )
+    call update_ice_model_slow (Ice, Ice%runoff, Ice%calving, Ice%runoff_hflx, Ice%calving_hflx, Ice%p_surf)
 
 end subroutine update_ice_model_slow_dn
 !=============================================================================================
