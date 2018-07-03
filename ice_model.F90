@@ -29,13 +29,15 @@ use  ocean_rough_mod, only:  compute_ocean_roughness, fixed_ocean_roughness
 use          fms_mod, only: file_exist, open_restart_file, close_file, &
                             mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
                             error_mesg, FATAL, check_nml_error, read_data, write_data,     &
-                            NOTE, WARNING, field_exist, field_size, get_mosaic_tile_grid, stdout
+                            NOTE, WARNING, field_exist, field_size, get_mosaic_tile_grid, stdout, &
+                            clock_flag_default
 
 use fms_io_mod,       only: save_restart, register_restart_field, restart_file_type, &
                             restore_state, set_domain, nullify_domain, query_initialized, &
                             get_restart_io_mode
 
-use mpp_mod,          only: mpp_chksum
+use mpp_mod,          only: mpp_chksum, mpp_clock_id, CLOCK_COMPONENT, &
+                            CLOCK_LOOP, CLOCK_ROUTINE, mpp_clock_begin, mpp_clock_end
 
 #ifdef INTERNAL_FILE_NML
 use          mpp_mod, only: input_nml_file
