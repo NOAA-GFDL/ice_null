@@ -258,7 +258,15 @@ character(len=80) :: restart_format = 'amip ice model restart format 02'
 logical :: module_is_initialized = .false.
 logical :: stock_warning_issued  = .false.
 
-integer :: isc, iec, jsc, jec
+
+integer                           :: isc, iec, jsc, jec ! compute domain
+integer                           :: km = 2  ! vertical size  
+                                             ! km is defined in ice_grid::set_ice grid in ice_sis; 
+                                             ! here, it is set to the same value as num_part, and used 
+                                             ! by variables passed to the dummy update_ice_fast_old routine. 
+
+! iceClock variables from ice_type.F90 for compatibility with ice_sis interfaces
+integer :: iceClock, iceClock1, iceCLock3
 
 ! id's for diagnostics
 integer :: id_sh, id_lh, id_sw, id_lw, id_snofl, id_rain, &
@@ -714,6 +722,13 @@ endif
 
 !   call ice_diag_init (Ice, xb, yb)
 
+    !Balaji
+    ! iceClock computation added for sis2 interface compatibility
+    iceClock = mpp_clock_id( 'Ice', flags=clock_flag_default, grain=CLOCK_COMPONENT )
+    iceClock1 = mpp_clock_id( 'Ice: bot to top', flags=clock_flag_default, grain=CLOCK_ROUTINE )
+    iceClock3 = mpp_clock_id( 'Ice: update fast', flags=clock_flag_default, grain=CLOCK_ROUTINE )
+ 
+
     !--- release the memory ------------------------------------------------
     deallocate(lonv, latv, glon, glat, rmask, xb, yb )
     call nullify_domain()
@@ -734,8 +749,8 @@ subroutine unpack_ocean_ice_boundary(Ocean_boundary, Ice)
   type(ocean_ice_boundary_type),  intent(inout) :: Ocean_boundary
   type(ice_data_type),            intent(inout) :: Ice
 
-! call ice_bottom_to_ice_top (Ice, Ocean_boundary%t, Ocean_boundary%u, Ocean_boundary%v,        &
-!                             Ocean_boundary%frazil, Ocean_boundary, Ocean_boundary%s, Ocean_boundary%sea_level)
+ call ice_bottom_to_ice_top (Ice, Ocean_boundary%t, Ocean_boundary%u, Ocean_boundary%v,        &
+                             Ocean_boundary%frazil, Ocean_boundary, Ocean_boundary%s, Ocean_boundary%sea_level)
   return
 end subroutine unpack_ocean_ice_boundary
 !=============================================================================================
