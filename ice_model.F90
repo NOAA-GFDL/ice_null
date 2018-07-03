@@ -382,8 +382,8 @@ contains
     call mpp_define_io_domain (Ice%Domain, io_layout)
     call set_domain (Ice%Domain)
     Ice%slow_Domain_NH = Ice%domain
-    call mpp_get_compute_domain( Ice%Domain, isc, iec, jsc, je )
-    isc = is; iec = ie; jsc = js; jec = je
+    call mpp_get_compute_domain( Ice%Domain, isc, iec, jsc, jec )
+
     allocate ( glon     (nlon  ), glat     (nlat  )  )
     allocate ( lonv (isc:iec+1, jsc:jec+1) )
     allocate ( latv (isc:iec+1, jsc:jec+1) )
@@ -404,11 +404,11 @@ contains
    !--- for conservation interpolation, the grid should be rectangular ----
    if(trim(interp_method) == "conservative" ) then
       err_mesg = 'Bilinear interpolation must be used for a tripolar grid'
-      do i=isc, ie
+      do i=isc, iec
          if(any(glon(i) /= Ice%lon(i,:)))  &
               call error_mesg ('ice_model_init',err_mesg,FATAL)
       enddo
-      do j=jsc,je
+      do j=jsc,jec
          if(any(glat(j) /= Ice%lat(:,j)))  &
               call error_mesg ('ice_model_init',err_mesg,FATAL)
       enddo
@@ -431,8 +431,8 @@ contains
       rmask = 0.0
       call get_grid_comp_area('OCN', 1, rmask, domain=Ice%Domain)
       rmask = rmask/cell_area
-      do j = jsc, je
-         do i = isc, ie
+      do j = jsc, jec
+         do i = isc, iec
             if(rmask(i,j) == 0.0) cell_area(i,j) = 0.0
          end do
       end do
