@@ -66,20 +66,6 @@ use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
 implicit none
 private
 
-!public :: ice_data_type, ocean_ice_boundary_type,               &
-!          atmos_ice_boundary_type, land_ice_boundary_type,      &
-!          ice_model_init, ice_model_end, update_ice_model_fast, &
-!          ice_stock_pe, cell_area, ice_model_restart,           &
-!
-!          ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum, &
-!          lnd_ice_bnd_type_chksum, ice_data_type_chksum, &
-!
-!          update_ice_atm_deposition_flux, share_ice_domains, &
-!          unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, &
-!          set_ice_surface_fields, ice_model_fast_cleanup, &
-!          unpack_land_ice_boundary, update_ice_model_slow, &
-!          exchange_fast_to_slow_ice
-
 public :: ice_data_type, ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
 public :: ice_model_init, ice_model_end, update_ice_model_fast, ice_stock_pe, cell_area
 public ::  share_ice_domains
@@ -867,7 +853,7 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
   type(land_ice_boundary_type), intent(in)    :: LIB ! The land ice boundary type that is being unpacked.
 !=============================================================================================
 !\brief: dummy version of ice_sis routine that is called by the new interfaces,
-!! but is not used by ice_amip. 
+!! but is not used by ice_null. 
  subroutine ice_bottom_to_ice_top(Ice, t_surf_ice_bot, u_surf_ice_bot, v_surf_ice_bot, &
                                     frazil_ice_bot, Ocean_ice_boundary, s_surf_ice_bot, sea_lev_ice_bot )
     type (ice_data_type),                    intent(inout) :: Ice
@@ -878,8 +864,8 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
 end subroutine ice_bottom_to_ice_top
 !=============================================================================================
 !\brief new coupler interface to provide ocean surface data to atmosphere
-!\note Only pass Ice to 'ice_bottom_to_ice_top' because it is a dummy routine here
- subroutine update_ice_model_slow_up ( Ocean_boundary, Ice )
+! calls a dummy version of ice_bottom_to_ice_top
+subroutine update_ice_model_slow_up ( Ocean_boundary, Ice )
     type(ocean_ice_boundary_type), intent(inout) :: Ocean_boundary
     type (ice_data_type),          intent(inout) :: Ice
 
@@ -890,37 +876,36 @@ end subroutine ice_bottom_to_ice_top
     call mpp_clock_end(iceClock1)
     call mpp_clock_end(iceClock)
 
- end subroutine update_ice_model_slow_up
+end subroutine update_ice_model_slow_up
 !=============================================================================================
 !\brief new coupler interface to do slow ice processes:  dynamics, transport, mass
 !
- subroutine update_ice_model_slow_dn ( Atmos_boundary, Land_boundary, Ice )
+subroutine update_ice_model_slow_dn ( Atmos_boundary, Land_boundary, Ice )
     type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
     type(land_ice_boundary_type),  intent(inout) :: Land_boundary
     type (ice_data_type),          intent(inout) :: Ice
 
     call unpack_land_ice_boundary( Ice, Land_boundary )
 
-    call update_ice_model_slow (Ice, runoff, calving, runoff_hflx, calving_hflx, p_surf )
+    call update_ice_model_slow (Ice, Ice%runoff, Ice%calving, Ice%runoff_hflx, Ice%calving_hflx, Ice%p_surf )
 
- end subroutine update_ice_model_slow_dn
+end subroutine update_ice_model_slow_dn
 !=============================================================================================
 !\brief new coupler interface to do fast ice processes
 !\note the update_ice_model_fast_old routine is different from the one in ice_sis
 ! However, the interface is the same in both versions of ice_model.F90.
- subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
+subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
    type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
    type (ice_data_type),          intent(inout) :: Ice
    call mpp_clock_begin(iceClock)
    call mpp_clock_begin(iceClock3)
 
-   call update_ice_model_fast_old (Ice,Atmos_boundary)
+   call update_ice_model_fast_old(Ice, Atmos_boundary)
 
    call mpp_clock_end(iceClock3)
    call mpp_clock_end(iceClock)
 
- end subroutine update_ice_model_fast_new
-
+end subroutine update_ice_model_fast_new
 ! logical :: sent
 ! integer :: i, j, i_off, j_off
 
