@@ -246,10 +246,6 @@ logical :: stock_warning_issued  = .false.
 
 
 integer                           :: isc, iec, jsc, jec ! compute domain
-integer                           :: km = 2  ! vertical size  
-                                             ! km is defined in ice_grid::set_ice grid in ice_sis; 
-                                             ! here, it is set to the same value as num_part, and used 
-                                             ! by variables passed to the dummy update_ice_fast_old routine. 
 
 ! iceClock variables from ice_type.F90 for compatibility with ice_sis interfaces
 integer :: iceClock, iceClock1, iceCLock3
