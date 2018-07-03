@@ -68,7 +68,6 @@ private
 
 public :: ice_data_type, ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
 public :: ice_model_init, ice_model_end, update_ice_model_fast, ice_stock_pe, cell_area
-public ::  share_ice_domains
 public :: ice_model_restart 
 public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 public :: lnd_ice_bnd_type_chksum, ice_data_type_chksum
