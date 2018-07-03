@@ -719,7 +719,7 @@ endif
 
   end subroutine ice_model_init
 !=============================================================================================
-subroutine update_ice_model_fast_old( Ice,Atmos_boundary, )
+subroutine update_ice_model_fast_old( Ice, Atmos_boundary)
 type (ice_data_type), intent(inout) :: Ice
 type(atmos_ice_boundary_type), intent(in) :: Atmos_boundary
 
