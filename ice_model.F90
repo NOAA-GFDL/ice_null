@@ -155,6 +155,7 @@ type ice_data_type
                                            p_surf =>NULL(), &
                                            runoff =>NULL(), &
                                            calving =>NULL(), &
+                                           stress_mag =>NULL(), &
                                            ustar_berg =>NULL(), &
                                            area_berg =>NULL(), &
                                            mass_berg =>NULL(), &
