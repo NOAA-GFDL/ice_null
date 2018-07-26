@@ -62,7 +62,7 @@ use grid_mod,         only: get_grid_comp_area, get_grid_size, get_grid_cell_ver
 
 
 !use  amip_interp_mod, only: amip_interp_type, amip_interp_new
-use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
+use coupler_types_mod,only: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 implicit none
 private
 
@@ -312,13 +312,25 @@ end interface
 contains
 
 !=============================================================================================
-  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice )
+  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, &
+                             concurrent_ice, gas_fluxes, gas_fields_ocn)
     type(ice_data_type), intent(inout) :: Ice
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
     logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
-                                                          ! there is no difference between fast and
+                                                          ! there is no difference between fast and                                                        
                                                           ! slow ice PEs.
+    type(coupler_1d_bc_type), &
+                optional, intent(in)    :: gas_fluxes     ! If present, this type describes the
+                                              ! additional gas or other tracer fluxes between the
+                                              ! ocean, ice, and atmosphere, and can be used to
+                                              ! spawn related internal variables in the ice model.
+    type(coupler_1d_bc_type), &
+                 optional, intent(in)   :: gas_fields_ocn  ! If present, this type describes the
+                                              ! ocean and surface-ice fields that will participate
+                                              ! in the calculation of additional gas or other
+                                              ! tracer fluxes, and can be used to spawn related
+                                              ! internal variables in the ice model.
 
     real, allocatable, dimension(:,:)   :: lonv, latv, rmask
     real, allocatable, dimension(:)     :: glon, glat
