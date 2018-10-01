@@ -29,13 +29,15 @@ use  ocean_rough_mod, only:  compute_ocean_roughness, fixed_ocean_roughness
 use          fms_mod, only: file_exist, open_restart_file, close_file, &
                             mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
                             error_mesg, FATAL, check_nml_error, read_data, write_data,     &
-                            NOTE, WARNING, field_exist, field_size, get_mosaic_tile_grid, stdout
+                            NOTE, WARNING, field_exist, field_size, get_mosaic_tile_grid, stdout, &
+                            clock_flag_default
 
 use fms_io_mod,       only: save_restart, register_restart_field, restart_file_type, &
                             restore_state, set_domain, nullify_domain, query_initialized, &
                             get_restart_io_mode
 
-use mpp_mod,          only: mpp_chksum
+use mpp_mod,          only: mpp_chksum, mpp_clock_id, CLOCK_COMPONENT, &
+                            CLOCK_LOOP, CLOCK_ROUTINE, mpp_clock_begin, mpp_clock_end
 
 #ifdef INTERNAL_FILE_NML
 use          mpp_mod, only: input_nml_file
@@ -60,21 +62,19 @@ use grid_mod,         only: get_grid_comp_area, get_grid_size, get_grid_cell_ver
 
 
 !use  amip_interp_mod, only: amip_interp_type, amip_interp_new
-use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
+use coupler_types_mod,only: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 implicit none
 private
 
-public :: ice_data_type, ocean_ice_boundary_type,               &
-          atmos_ice_boundary_type, land_ice_boundary_type,      &
-          ice_model_init, ice_model_end, update_ice_model_fast, &
-          ice_stock_pe, cell_area, ice_model_restart,           &
-          ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum, &
-          lnd_ice_bnd_type_chksum, ice_data_type_chksum, &
-          update_ice_atm_deposition_flux, share_ice_domains, &
-          unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, &
-          set_ice_surface_fields, ice_model_fast_cleanup, &
-          unpack_land_ice_boundary, update_ice_model_slow, &
-          exchange_fast_to_slow_ice
+public :: ice_data_type, ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
+public :: ice_model_init, ice_model_end, update_ice_model_fast, ice_stock_pe, cell_area
+public :: ice_model_restart 
+public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
+public :: lnd_ice_bnd_type_chksum, ice_data_type_chksum
+public :: update_ice_atm_deposition_flux, share_ice_domains
+public :: unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, set_ice_surface_fields
+public :: ice_model_fast_cleanup, unpack_land_ice_boundary
+public :: exchange_fast_to_slow_ice, update_ice_model_slow
 
 type ice_data_type
   type(domain2d)                        :: Domain
@@ -155,6 +155,7 @@ type ice_data_type
                                            p_surf =>NULL(), &
                                            runoff =>NULL(), &
                                            calving =>NULL(), &
+                                           stress_mag =>NULL(), &
                                            ustar_berg =>NULL(), &
                                            area_berg =>NULL(), &
                                            mass_berg =>NULL(), &
@@ -243,7 +244,11 @@ character(len=80) :: restart_format = 'amip ice model restart format 02'
 logical :: module_is_initialized = .false.
 logical :: stock_warning_issued  = .false.
 
-integer :: isc, iec, jsc, jec
+
+integer                           :: isc, iec, jsc, jec ! compute domain
+
+! iceClock variables from ice_type.F90 for compatibility with ice_sis interfaces
+integer :: iceClock, iceClock1, iceCLock3
 
 ! id's for diagnostics
 integer :: id_sh, id_lh, id_sw, id_lw, id_snofl, id_rain, &
@@ -299,23 +304,40 @@ integer :: id_restart_albedo
 integer :: mlon, mlat, npart ! global grid size
 type(restart_file_type), save :: Ice_restart
 
+! interface for fast ice for compatibility with SIS2 
+interface update_ice_model_fast ! overload to support old interface
+     module procedure update_ice_model_fast_new
+end interface
+
 contains
 
 !=============================================================================================
-  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice )
+  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, &
+                             concurrent_ice, gas_fluxes, gas_fields_ocn)
     type(ice_data_type), intent(inout) :: Ice
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
     logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
-                                                          ! there is no difference between fast and
+                                                          ! there is no difference between fast and                                                        
                                                           ! slow ice PEs.
+    type(coupler_1d_bc_type), &
+                optional, intent(in)    :: gas_fluxes     ! If present, this type describes the
+                                              ! additional gas or other tracer fluxes between the
+                                              ! ocean, ice, and atmosphere, and can be used to
+                                              ! spawn related internal variables in the ice model.
+    type(coupler_1d_bc_type), &
+                 optional, intent(in)   :: gas_fields_ocn  ! If present, this type describes the
+                                              ! ocean and surface-ice fields that will participate
+                                              ! in the calculation of additional gas or other
+                                              ! tracer fluxes, and can be used to spawn related
+                                              ! internal variables in the ice model.
 
     real, allocatable, dimension(:,:)   :: lonv, latv, rmask
     real, allocatable, dimension(:)     :: glon, glat
     real, allocatable, dimension(:)     :: xb, yb ! 1d global grid for diag_mgr
     real, allocatable, dimension(:,:)   :: tmpx, tmpy, tmp_2d
     integer                             :: io, ierr, unit, siz(4), logunit
-    integer                             :: nlon, nlat, is, ie, js, je, i, j, k
+    integer                             :: nlon, nlat, i, j, k
     character(len=80)                   :: control
     character(len=80)                   :: domainname
     character(len=256)                  :: err_mesg
@@ -372,18 +394,18 @@ contains
     call mpp_define_io_domain (Ice%Domain, io_layout)
     call set_domain (Ice%Domain)
     Ice%slow_Domain_NH = Ice%domain
-    call mpp_get_compute_domain( Ice%Domain, is, ie, js, je )
-    isc = is; iec = ie; jsc = js; jec = je
+    call mpp_get_compute_domain( Ice%Domain, isc, iec, jsc, jec )
+
     allocate ( glon     (nlon  ), glat     (nlat  )  )
-    allocate ( lonv (is:ie+1, js:je+1) )
-    allocate ( latv (is:ie+1, js:je+1) )
-    allocate(  rmask(is:ie,js:je) )
+    allocate ( lonv (isc:iec+1, jsc:jec+1) )
+    allocate ( latv (isc:iec+1, jsc:jec+1) )
+    allocate(  rmask(isc:iec,jsc:jec) )
     allocate(  Ice%glon_bnd(nlon+1),    Ice%glat_bnd(nlat+1)    )
-    allocate ( Ice%lon_bnd (is:ie+1),  &
-               Ice%lat_bnd (js:je+1),  &
-               Ice%lon (is:ie, js:je), &
-               Ice%lat (is:ie, js:je), &
-               Ice%SST_C(is:ie, js:je) )
+    allocate ( Ice%lon_bnd (isc:iec+1),  &
+               Ice%lat_bnd (jsc:jec+1),  &
+               Ice%lon (isc:iec, jsc:jec), &
+               Ice%lat (isc:iec, jsc:jec), &
+               Ice%SST_C(isc:iec, jsc:jec) )
 
 !  ---- set up local grid -----
    call get_grid_cell_vertices('OCN', 1, Ice%glon_bnd, Ice%glat_bnd)
@@ -394,11 +416,11 @@ contains
    !--- for conservation interpolation, the grid should be rectangular ----
    if(trim(interp_method) == "conservative" ) then
       err_mesg = 'Bilinear interpolation must be used for a tripolar grid'
-      do i=is, ie
+      do i=isc, iec
          if(any(glon(i) /= Ice%lon(i,:)))  &
               call error_mesg ('ice_model_init',err_mesg,FATAL)
       enddo
-      do j=js,je
+      do j=jsc,jec
          if(any(glat(j) /= Ice%lat(:,j)))  &
               call error_mesg ('ice_model_init',err_mesg,FATAL)
       enddo
@@ -406,7 +428,7 @@ contains
 
     !---------------- read ice cell areas from grid_spec.nc or ----------------
     !---------------- calculate the area for mosaic grid file  ----------------
-    allocate (cell_area(is:ie, js:je))
+    allocate (cell_area(isc:iec, jsc:jec))
     cell_area = 0.0
     call get_grid_cell_area('OCN', 1, cell_area, Ice%domain)
         
@@ -421,8 +443,8 @@ contains
       rmask = 0.0
       call get_grid_comp_area('OCN', 1, rmask, domain=Ice%Domain)
       rmask = rmask/cell_area
-      do j = js, je
-         do i = is, ie
+      do j = jsc, jec
+         do i = isc, iec
             if(rmask(i,j) == 0.0) cell_area(i,j) = 0.0
          end do
       end do
@@ -432,28 +454,28 @@ contains
 
     !--- xb and yb is for diagnostics --------------------------------------
    allocate(xb(nlon+1), yb(nlat+1) )
-   allocate ( tmpx(is:ie+1, nlat+1) )
+   allocate ( tmpx(isc:iec+1, nlat+1) )
    call mpp_set_domain_symmetry(Ice%Domain, .TRUE.)
    call mpp_global_field(Ice%Domain, lonv, tmpx, flags=YUPDATE, position=CORNER)
-   allocate ( tmp_2d(is:ie+1, js:je+1) )
+   allocate ( tmp_2d(isc:iec+1, jsc:jec+1) )
    tmp_2d = 0
-   tmp_2d(is:ie+1,js) = sum(tmpx,2)/(nlat+1);
+   tmp_2d(isc:iec+1,jsc) = sum(tmpx,2)/(nlat+1);
    deallocate(tmpx)
-   allocate ( tmpx(nlon+1, js:je+1) )
+   allocate ( tmpx(nlon+1, jsc:jec+1) )
 
    call mpp_global_field(Ice%Domain, tmp_2d, tmpx, flags=XUPDATE, position=CORNER)
-   xb = tmpx(:,js)
+   xb = tmpx(:,jsc)
    deallocate(tmpx, tmp_2d)
 
-   allocate ( tmpy(nlon+1, js:je+1) )
+   allocate ( tmpy(nlon+1, jsc:jec+1) )
    call mpp_global_field(Ice%Domain, latv, tmpy, flags=XUPDATE, position=CORNER)
-   allocate ( tmp_2d(is:ie+1, js:je+1) )
+   allocate ( tmp_2d(isc:iec+1, jsc:jec+1) )
    tmp_2d = 0
-   tmp_2d(is,js:je+1) = sum(tmpy,1)/(nlon+1);
+   tmp_2d(isc,jsc:jec+1) = sum(tmpy,1)/(nlon+1);
    deallocate(tmpy)
-   allocate ( tmpy(is:ie+1, nlat+1) )
+   allocate ( tmpy(isc:iec+1, nlat+1) )
    call mpp_global_field(Ice%Domain, tmp_2d, tmpy, flags=YUPDATE, position=CORNER)
-   yb = tmpy(is,:)
+   yb = tmpy(isc,:)
    deallocate(tmpy, tmp_2d)
    call mpp_set_domain_symmetry(Ice%Domain, .FALSE.)   
 
@@ -462,26 +484,26 @@ contains
    Ice%lat = Ice%lat*pi/180.
    Ice%glon_bnd = Ice%glon_bnd*pi/180.
    Ice%glat_bnd = Ice%glat_bnd*pi/180.
-   Ice%lon_bnd    = Ice%glon_bnd(is:ie+1)
-   Ice%lat_bnd    = Ice%glat_bnd(js:je+1)
+   Ice%lon_bnd    = Ice%glon_bnd(isc:iec+1)
+   Ice%lat_bnd    = Ice%glat_bnd(jsc:jec+1)
     !-----------------------------------------------------------------------
 
-    allocate ( Ice%ice_mask    (is:ie, js:je, num_part)         , &
-               Ice%temp        (is:ie, js:je, num_part, num_lev), &
-               Ice%part_size   (is:ie, js:je, num_part)         , &
-               Ice%albedo      (is:ie, js:je, num_part)         , &
-            Ice%albedo_vis_dir (is:ie, js:je, num_part)         , &
-            Ice%albedo_nir_dir (is:ie, js:je, num_part)         , &
-            Ice%albedo_vis_dif (is:ie, js:je, num_part)         , &
-            Ice%albedo_nir_dif (is:ie, js:je, num_part)         , &
-               Ice%rough_mom   (is:ie, js:je, num_part)         , &
-               Ice%rough_heat  (is:ie, js:je, num_part)         , &
-               Ice%rough_moist (is:ie, js:je, num_part)         , &
-               Ice%u_surf      (is:ie, js:je, num_part)         , &
-               Ice%v_surf      (is:ie, js:je, num_part)         , &
-               Ice%thickness   (is:ie, js:je, num_part)         , &
-               Ice%mask        (is:ie, js:je)                   , &
-               Ice%SST_C(is:ie, js:je) )
+    allocate ( Ice%ice_mask    (isc:iec, jsc:jec, num_part)         , &
+               Ice%temp        (isc:iec, jsc:jec, num_part, num_lev), &
+               Ice%part_size   (isc:iec, jsc:jec, num_part)         , &
+               Ice%albedo      (isc:iec, jsc:jec, num_part)         , &
+            Ice%albedo_vis_dir (isc:iec, jsc:jec, num_part)         , &
+            Ice%albedo_nir_dir (isc:iec, jsc:jec, num_part)         , &
+            Ice%albedo_vis_dif (isc:iec, jsc:jec, num_part)         , &
+            Ice%albedo_nir_dif (isc:iec, jsc:jec, num_part)         , &
+               Ice%rough_mom   (isc:iec, jsc:jec, num_part)         , &
+               Ice%rough_heat  (isc:iec, jsc:jec, num_part)         , &
+               Ice%rough_moist (isc:iec, jsc:jec, num_part)         , &
+               Ice%u_surf      (isc:iec, jsc:jec, num_part)         , &
+               Ice%v_surf      (isc:iec, jsc:jec, num_part)         , &
+               Ice%thickness   (isc:iec, jsc:jec, num_part)         , &
+               Ice%mask        (isc:iec, jsc:jec)                   , &
+               Ice%SST_C(isc:iec, jsc:jec) )
 
     Ice%t_surf => Ice%temp (:,:,:,1)
 
@@ -495,49 +517,49 @@ contains
     where ( rmask > 0 ) Ice%mask = .true.
 
 
-    allocate ( Ice%flux_u_bot  (is:ie, js:je, num_part) , &
-               Ice%flux_v_bot  (is:ie, js:je, num_part) , &
-               Ice%flux_t_bot  (is:ie, js:je, num_part) , &
-               Ice%flux_q_bot  (is:ie, js:je, num_part) , &
-               Ice%flux_lh_bot (is:ie, js:je, num_part) , &
-               Ice%flux_sw_bot (is:ie, js:je, num_part) , &
-        Ice%flux_sw_vis_bot    (is:ie, js:je, num_part) , &
-        Ice%flux_sw_dir_bot    (is:ie, js:je, num_part) , &
-        Ice%flux_sw_dif_bot    (is:ie, js:je, num_part) , &
-        Ice%flux_sw_vis_dir_bot(is:ie, js:je, num_part) , &
-        Ice%flux_sw_vis_dif_bot(is:ie, js:je, num_part) , &
-        Ice%flux_sw_nir_dir_bot(is:ie, js:je, num_part) , &
-        Ice%flux_sw_nir_dif_bot(is:ie, js:je, num_part) , &
-               Ice%flux_lw_bot (is:ie, js:je, num_part) , &
-               Ice%lprec_bot   (is:ie, js:je, num_part) , &
-               Ice%fprec_bot   (is:ie, js:je, num_part) , &
-               Ice%runoff_bot  (is:ie, js:je, num_part) , &
-               Ice%frazil      (is:ie, js:je, num_part)   )
+    allocate ( Ice%flux_u_bot  (isc:iec, jsc:jec, num_part) , &
+               Ice%flux_v_bot  (isc:iec, jsc:jec, num_part) , &
+               Ice%flux_t_bot  (isc:iec, jsc:jec, num_part) , &
+               Ice%flux_q_bot  (isc:iec, jsc:jec, num_part) , &
+               Ice%flux_lh_bot (isc:iec, jsc:jec, num_part) , &
+               Ice%flux_sw_bot (isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_vis_bot    (isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_dir_bot    (isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_dif_bot    (isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_vis_dir_bot(isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_vis_dif_bot(isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_nir_dir_bot(isc:iec, jsc:jec, num_part) , &
+        Ice%flux_sw_nir_dif_bot(isc:iec, jsc:jec, num_part) , &
+               Ice%flux_lw_bot (isc:iec, jsc:jec, num_part) , &
+               Ice%lprec_bot   (isc:iec, jsc:jec, num_part) , &
+               Ice%fprec_bot   (isc:iec, jsc:jec, num_part) , &
+               Ice%runoff_bot  (isc:iec, jsc:jec, num_part) , &
+               Ice%frazil      (isc:iec, jsc:jec, num_part)   )
 
-    allocate ( Ice%flux_u    (is:ie, js:je) , &
-               Ice%flux_v    (is:ie, js:je) , &
-               Ice%flux_t    (is:ie, js:je) , &
-               Ice%flux_q    (is:ie, js:je) , &
-               Ice%flux_lh   (is:ie, js:je) , &
-               Ice%flux_sw   (is:ie, js:je) , &
-         Ice%flux_sw_vis     (is:ie, js:je) , &
-         Ice%flux_sw_dir     (is:ie, js:je) , &
-         Ice%flux_sw_dif     (is:ie, js:je) , &
-         Ice%flux_sw_vis_dir (is:ie, js:je) , &
-         Ice%flux_sw_vis_dif (is:ie, js:je) , &
-         Ice%flux_sw_nir_dir (is:ie, js:je) , &
-         Ice%flux_sw_nir_dif (is:ie, js:je) , &
-               Ice%flux_lw   (is:ie, js:je) , &
-               Ice%lprec     (is:ie, js:je) , &
-               Ice%fprec     (is:ie, js:je) , &
-               Ice%p_surf    (is:ie, js:je) , &
-               Ice%runoff    (is:ie, js:je) , &
-               Ice%calving   (is:ie, js:je) , &
-             Ice%runoff_hflx (is:ie, js:je) , &
-             Ice%calving_hflx(is:ie, js:je) , &
-             Ice%area        (is:ie, js:je) , &
-             Ice%mi          (is:ie, js:je) , &
-               Ice%flux_salt (is:ie, js:je)   )
+    allocate ( Ice%flux_u    (isc:iec, jsc:jec) , &
+               Ice%flux_v    (isc:iec, jsc:jec) , &
+               Ice%flux_t    (isc:iec, jsc:jec) , &
+               Ice%flux_q    (isc:iec, jsc:jec) , &
+               Ice%flux_lh   (isc:iec, jsc:jec) , &
+               Ice%flux_sw   (isc:iec, jsc:jec) , &
+         Ice%flux_sw_vis     (isc:iec, jsc:jec) , &
+         Ice%flux_sw_dir     (isc:iec, jsc:jec) , &
+         Ice%flux_sw_dif     (isc:iec, jsc:jec) , &
+         Ice%flux_sw_vis_dir (isc:iec, jsc:jec) , &
+         Ice%flux_sw_vis_dif (isc:iec, jsc:jec) , &
+         Ice%flux_sw_nir_dir (isc:iec, jsc:jec) , &
+         Ice%flux_sw_nir_dif (isc:iec, jsc:jec) , &
+               Ice%flux_lw   (isc:iec, jsc:jec) , &
+               Ice%lprec     (isc:iec, jsc:jec) , &
+               Ice%fprec     (isc:iec, jsc:jec) , &
+               Ice%p_surf    (isc:iec, jsc:jec) , &
+               Ice%runoff    (isc:iec, jsc:jec) , &
+               Ice%calving   (isc:iec, jsc:jec) , &
+             Ice%runoff_hflx (isc:iec, jsc:jec) , &
+             Ice%calving_hflx(isc:iec, jsc:jec) , &
+             Ice%area        (isc:iec, jsc:jec) , &
+             Ice%mi          (isc:iec, jsc:jec) , &
+               Ice%flux_salt (isc:iec, jsc:jec)   )
 Ice%flux_u = 0.0
 Ice%flux_v = 0.0
 Ice%flux_t = 0.0
@@ -694,6 +716,13 @@ endif
 
 !   call ice_diag_init (Ice, xb, yb)
 
+    !Balaji
+    ! iceClock computation added for sis2 interface compatibility
+    iceClock = mpp_clock_id( 'Ice', flags=clock_flag_default, grain=CLOCK_COMPONENT )
+    iceClock1 = mpp_clock_id( 'Ice: bot to top', flags=clock_flag_default, grain=CLOCK_ROUTINE )
+    iceClock3 = mpp_clock_id( 'Ice: update fast', flags=clock_flag_default, grain=CLOCK_ROUTINE )
+ 
+
     !--- release the memory ------------------------------------------------
     deallocate(lonv, latv, glon, glat, rmask, xb, yb )
     call nullify_domain()
@@ -702,20 +731,20 @@ endif
 
   end subroutine ice_model_init
 !=============================================================================================
-subroutine update_ice_model_fast( Atmos_boundary, Ice )
-type(atmos_ice_boundary_type), intent(in) :: Atmos_boundary
+subroutine update_ice_model_fast_old( Ice, Atmos_boundary)
 type (ice_data_type), intent(inout) :: Ice
+type(atmos_ice_boundary_type), intent(in) :: Atmos_boundary
 
 return
-end subroutine update_ice_model_fast
+end subroutine update_ice_model_fast_old
 !=============================================================================================
 
 subroutine unpack_ocean_ice_boundary(Ocean_boundary, Ice)
   type(ocean_ice_boundary_type),  intent(inout) :: Ocean_boundary
   type(ice_data_type),            intent(inout) :: Ice
 
-! call ice_bottom_to_ice_top (Ice, Ocean_boundary%t, Ocean_boundary%u, Ocean_boundary%v,        &
-!                             Ocean_boundary%frazil, Ocean_boundary, Ocean_boundary%s, Ocean_boundary%sea_level)
+ call ice_bottom_to_ice_top (Ice, Ocean_boundary%t, Ocean_boundary%u, Ocean_boundary%v,        &
+                             Ocean_boundary%frazil, Ocean_boundary, Ocean_boundary%s, Ocean_boundary%sea_level)
   return
 end subroutine unpack_ocean_ice_boundary
 !=============================================================================================
@@ -723,7 +752,7 @@ subroutine update_ice_model_slow( Ice, runoff, calving, runoff_hflx, calving_hfl
 type(ice_data_type),           intent(inout) :: Ice
 real, dimension(:,:), intent(in), optional :: runoff, calving
 real, dimension(:,:), intent(in), optional :: runoff_hflx, calving_hflx
-real, dimension(:,:,:),           intent(in), optional :: p_surf
+real, dimension(:,:),           intent(in), optional :: p_surf
 
 return
 end subroutine update_ice_model_slow
@@ -830,7 +859,6 @@ end subroutine ice_model_fast_cleanup
 subroutine unpack_land_ice_boundary(Ice, LIB)
   type(ice_data_type),          intent(inout) :: Ice ! The publicly visible ice data type.
   type(land_ice_boundary_type), intent(in)    :: LIB ! The land ice boundary type that is being unpacked.
-
 ! logical :: sent
 ! integer :: i, j, i_off, j_off
 
@@ -893,7 +921,61 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
 !       enddo
 !    enddo
 ! endif
-
 end subroutine unpack_land_ice_boundary
+!=============================================================================================
+!\brief: dummy version of ice_sis routine that is called by the new interfaces,
+!! but is not used by ice_null. 
+ subroutine ice_bottom_to_ice_top(Ice, t_surf_ice_bot, u_surf_ice_bot, v_surf_ice_bot, &
+                                    frazil_ice_bot, Ocean_ice_boundary, s_surf_ice_bot, sea_lev_ice_bot )
+    type (ice_data_type),                    intent(inout) :: Ice
+    real, dimension(isc:iec,jsc:jec),           intent(in) :: t_surf_ice_bot, u_surf_ice_bot
+    real, dimension(isc:iec,jsc:jec),           intent(in) :: v_surf_ice_bot, frazil_ice_bot
+    type(ocean_ice_boundary_type),           intent(inout) :: Ocean_ice_boundary
+    real, dimension(isc:iec,jsc:jec), intent(in), optional :: s_surf_ice_bot, sea_lev_ice_bot
+end subroutine ice_bottom_to_ice_top
+!=============================================================================================
+!\brief new coupler interface to provide ocean surface data to atmosphere
+! calls a dummy version of ice_bottom_to_ice_top
+subroutine update_ice_model_slow_up ( Ocean_boundary, Ice )
+    type(ocean_ice_boundary_type), intent(inout) :: Ocean_boundary
+    type (ice_data_type),          intent(inout) :: Ice
+
+    call mpp_clock_begin(iceClock)
+    call mpp_clock_begin(iceClock1)
+    call ice_bottom_to_ice_top(Ice, Ocean_boundary%t, Ocean_boundary%u, Ocean_boundary%v,        &
+                                Ocean_boundary%frazil, Ocean_boundary, Ocean_boundary%s, Ocean_boundary%sea_level  )
+    call mpp_clock_end(iceClock1)
+    call mpp_clock_end(iceClock)
+
+end subroutine update_ice_model_slow_up
+!=============================================================================================
+!\brief new coupler interface to do slow ice processes:  dynamics, transport, mass
+!
+subroutine update_ice_model_slow_dn ( Atmos_boundary, Land_boundary, Ice )
+    type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
+    type(land_ice_boundary_type),  intent(inout) :: Land_boundary
+    type (ice_data_type),          intent(inout) :: Ice
+
+    call unpack_land_ice_boundary( Ice, Land_boundary )
+
+    call update_ice_model_slow (Ice, Ice%runoff, Ice%calving, Ice%runoff_hflx, Ice%calving_hflx, Ice%p_surf)
+
+end subroutine update_ice_model_slow_dn
+!=============================================================================================
+!\brief new coupler interface to do fast ice processes
+!\note the update_ice_model_fast_old routine is different from the one in ice_sis
+! However, the interface is the same in both versions of ice_model.F90.
+subroutine update_ice_model_fast_new ( Atmos_boundary, Ice )
+   type(atmos_ice_boundary_type), intent(inout) :: Atmos_boundary
+   type (ice_data_type),          intent(inout) :: Ice
+   call mpp_clock_begin(iceClock)
+   call mpp_clock_begin(iceClock3)
+
+   call update_ice_model_fast_old(Ice, Atmos_boundary)
+
+   call mpp_clock_end(iceClock3)
+   call mpp_clock_end(iceClock)
+
+end subroutine update_ice_model_fast_new
 !=============================================================================================
 end module ice_model_mod
