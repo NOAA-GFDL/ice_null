@@ -60,7 +60,7 @@ use grid_mod,         only: get_grid_comp_area, get_grid_size, get_grid_cell_ver
 
 
 !use  amip_interp_mod, only: amip_interp_type, amip_interp_new
-use coupler_types_mod,only: coupler_2d_bc_type, coupler_3d_bc_type
+use coupler_types_mod,only: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 implicit none
 private
 
@@ -302,13 +302,16 @@ type(restart_file_type), save :: Ice_restart
 contains
 
 !=============================================================================================
-  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice )
+  subroutine ice_model_init( Ice, Time_Init, Time, Time_step_fast, Time_step_slow, Verona_coupler, concurrent_ice,&
+      & gas_fluxes, gas_fields_ocn )
     type(ice_data_type), intent(inout) :: Ice
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
     logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
                                                           ! there is no difference between fast and
                                                           ! slow ice PEs.
+    type(coupler_1d_bc_type), optional, intent(in) :: gas_fluxes ! needed for compatibility with SIS2 APIs
+    type(coupler_1d_bc_type), optional, intent(in) :: gas_fields_ocn ! needed for compatibility with SIS2 APIs
 
     real, allocatable, dimension(:,:)   :: lonv, latv, rmask
     real, allocatable, dimension(:)     :: glon, glat
