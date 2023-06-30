@@ -279,7 +279,7 @@ logical :: use_leads                = .false.
 logical :: use_climo_ice            = .false.
 logical :: use_annual_ice           = .false.
 integer, dimension(2) :: layout     = (/ 0, 0 /)
-integer, dimension(2) :: io_layout  = (/ 1, 1 /)
+integer, dimension(2) :: io_layout  = (/ 0, 0 /)
 character(len=64) :: interp_method  = "conservative" ! default conservative scheme
 logical :: do_netcdf_restart        = .true.
 character(len=128) :: axisname_x    = 'xt'  ! x-axis name of temperature grid
