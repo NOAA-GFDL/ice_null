@@ -27,7 +27,7 @@ use ocean_albedo_mod, only:  compute_ocean_albedo_new
 use  ocean_rough_mod, only:  compute_ocean_roughness, fixed_ocean_roughness
 
 use fms2_io_mod, only : file_exists, open_file, close_file, write_restart, read_data, &
-                        variable_exists, FmsNetcdfDomainFile_t,FmsNetcdfFile_t
+                        variable_exists, FmsNetcdfDomainFile_t,FmsNetcdfFile_t, read_new_restart 
 
 use          fms_mod, only: mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
                             error_mesg, FATAL, check_nml_error, &
@@ -378,7 +378,6 @@ contains
     domainname = 'AMIP Ice'
     call mpp_define_domains( (/1,nlon,1,nlat/), layout, Ice%Domain, name=domainname )
     call mpp_define_io_domain (Ice%Domain, io_layout)
-    call set_domain (Ice%Domain)
     Ice%slow_Domain_NH = Ice%domain
     call mpp_get_compute_domain( Ice%Domain, isc, iec, jsc, jec )
 
@@ -595,7 +594,7 @@ if (open_file(Ice_restart, "INPUT/ice_model.res.nc", 'read', Ice%domain)) then
   !if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
   !         'Reading NetCDF formatted restart file: INPUT/ice_model.res.nc', NOTE)
 
-   call netcdf_restore_state(Ice_restart)
+   call read_new_restart(Ice_restart)
 
    ! have to double check variable name, before id_restart_albedo was passed in uninitialized
    if (variable_exists(Ice_restart, "albedo")) then
