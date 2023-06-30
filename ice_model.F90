@@ -26,15 +26,14 @@ use ocean_albedo_mod, only:  compute_ocean_albedo_new
 
 use  ocean_rough_mod, only:  compute_ocean_roughness, fixed_ocean_roughness
 
-use          fms_mod, only: file_exist, open_restart_file, close_file, &
-                            mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
-                            error_mesg, FATAL, check_nml_error, read_data, write_data,     &
-                            NOTE, WARNING, field_exist, field_size, get_mosaic_tile_grid, stdout, &
+use fms2_io_mod, only : open_file, close_file, read_data, &
+                        variable_exists,FmsNetcdfFile_t
+
+use          fms_mod, only: mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
+                            error_mesg, FATAL, check_nml_error, &
+                            NOTE, WARNING, stdout, &
                             clock_flag_default
 
-use fms_io_mod,       only: save_restart, register_restart_field, restart_file_type, &
-                            restore_state, set_domain, nullify_domain, query_initialized, &
-                            get_restart_io_mode
 
 use mpp_mod,          only: mpp_chksum, mpp_clock_id, CLOCK_COMPONENT, &
                             CLOCK_LOOP, CLOCK_ROUTINE, mpp_clock_begin, mpp_clock_end
@@ -56,8 +55,8 @@ use diag_manager_mod, only: diag_axis_init, register_diag_field, send_data
 
 use time_manager_mod, only: time_type, operator(+)
 
-use mosaic_mod,       only: get_mosaic_ntiles, get_mosaic_grid_sizes
-use grid_mod,         only: get_grid_comp_area, get_grid_size, get_grid_cell_vertices, &
+use mosaic2_mod,       only: get_mosaic_ntiles, get_mosaic_grid_sizes
+use grid2_mod,         only: get_grid_comp_area, get_grid_size, get_grid_cell_vertices, &
                             get_grid_cell_centers, get_grid_cell_area
 
 
@@ -68,7 +67,7 @@ private
 
 public :: ice_data_type, ocean_ice_boundary_type, atmos_ice_boundary_type, land_ice_boundary_type
 public :: ice_model_init, ice_model_end, update_ice_model_fast, ice_stock_pe, cell_area
-public :: ice_model_restart 
+public :: ice_model_restart
 public :: ocn_ice_bnd_type_chksum, atm_ice_bnd_type_chksum
 public :: lnd_ice_bnd_type_chksum, ice_data_type_chksum
 public :: update_ice_atm_deposition_flux, share_ice_domains
@@ -169,7 +168,7 @@ type ice_data_type
                                                          ! processors would be all land points and
                                                          ! are not assigned to actual processors.
                                                          ! This need not be assigned if all logical
-                                                         ! processors are used. This variable is dummy and need 
+                                                         ! processors are used. This variable is dummy and need
                                                          ! not to be set, but it is needed to pass compilation.
 
    integer                              :: avg_kount
@@ -270,8 +269,8 @@ logical :: sent
 integer, parameter :: num_lev  = 1
 integer, parameter :: num_part = 2
 
-real    :: diff                     = 2.092  
-real    :: thickness_min            = 0.10 
+real    :: diff                     = 2.092
+real    :: thickness_min            = 0.10
 real    :: specified_ice_thickness  = 2.0
 real    :: temp_ice_freeze          = -1.66    ! was 271.5
 real    :: roughness_ice            = 1.e-4
@@ -300,11 +299,9 @@ real, parameter :: latent = hlv + hlf
 !type(amip_interp_type), save :: Amip
 real, allocatable, dimension(:,:) ::  cell_area  ! grid cell area; sphere frac.
 
-integer :: id_restart_albedo
 integer :: mlon, mlat, npart ! global grid size
-type(restart_file_type), save :: Ice_restart
 
-! interface for fast ice for compatibility with SIS2 
+! interface for fast ice for compatibility with SIS2
 interface update_ice_model_fast ! overload to support old interface
      module procedure update_ice_model_fast_new
 end interface
@@ -318,7 +315,7 @@ contains
     type(time_type)    , intent(in)    :: Time_Init, Time, Time_step_fast, Time_step_slow
     logical,   optional, intent(in)    :: Verona_coupler
     logical,    optional, intent(in)    :: Concurrent_ice ! for compatibility with SIS2. For SIS1
-                                                          ! there is no difference between fast and                                                        
+                                                          ! there is no difference between fast and
                                                           ! slow ice PEs.
     type(coupler_1d_bc_type), &
                 optional, intent(in)    :: gas_fluxes     ! If present, this type describes the
@@ -342,8 +339,9 @@ contains
     character(len=80)                   :: domainname
     character(len=256)                  :: err_mesg
     character(len=64)                   :: fname = 'INPUT/ice_model.res.nc'
-    character(len=256)                  :: grid_file='INPUT/grid_spec.nc'
-    character(len=256)                  :: ocean_mosaic, tile_file
+    character(len=256)                  :: grid_filename='INPUT/grid_spec.nc'
+    type(FmsNetcdfFile_t)               :: grid_fileobj, ocn_mosaic_fileobj
+    character(len=256)                  :: ocn_mosaic_filename, tile_file
     character(len=256)                  :: axo_file      ! atmosXocean exchange grid file
     integer                             :: nx(1), ny(1)
     integer                             :: ntiles, n, m
@@ -354,23 +352,8 @@ contains
 
     if(module_is_initialized) return
 
-#ifdef INTERNAL_FILE_NML
-    read (input_nml_file, nml=ice_model_nml, iostat=io)
+    read(input_nml_file, ice_model_nml, iostat=io)
     ierr = check_nml_error(io, 'ice_model_nml')
-#else
-    if ( file_exist( 'input.nml' ) ) then
-       unit = open_namelist_file ( )
-       ierr = 1
-       do while ( ierr /= 0 )
-          read ( unit,  nml = ice_model_nml, iostat = io, end = 10 )
-          ierr = check_nml_error ( io, 'ice_model_nml' )
-       enddo
-10     continue
-       call close_file (unit)
-    endif
-#endif
-
-    call get_restart_io_mode(do_netcdf_restart)
 
     call write_version_number (version, tagname)
     if ( mpp_pe() == mpp_root_pe() ) then
@@ -381,7 +364,7 @@ contains
    !if (num_part /= 2) call error_mesg ('ice_model_init','this version must have num_part = 2', FATAL)
    !if (num_lev  /= 1) call error_mesg ('ice_model_init','this version must have num_lev = 1', FATAL)
 
-    !--- get the grid size 
+    !--- get the grid size
     call get_grid_size('OCN',1,nlon,nlat)
 
     !-------------------- domain decomposition -----------------------------
@@ -392,7 +375,6 @@ contains
     domainname = 'AMIP Ice'
     call mpp_define_domains( (/1,nlon,1,nlat/), layout, Ice%Domain, name=domainname )
     call mpp_define_io_domain (Ice%Domain, io_layout)
-    call set_domain (Ice%Domain)
     Ice%slow_Domain_NH = Ice%domain
     call mpp_get_compute_domain( Ice%Domain, isc, iec, jsc, jec )
 
@@ -431,25 +413,37 @@ contains
     allocate (cell_area(isc:iec, jsc:jec))
     cell_area = 0.0
     call get_grid_cell_area('OCN', 1, cell_area, Ice%domain)
-        
+
    !   ------ define Data masks ------
-   if(field_exist(grid_file, 'wet')) then
-      call read_data(grid_file, "wet",      rmask,     Ice%Domain)
-   else if(field_exist(grid_file, 'ocn_mosaic_file') ) then ! read from mosaic file
-      call read_data(grid_file, "ocn_mosaic_file", ocean_mosaic)
-      ocean_mosaic = "INPUT/"//trim(ocean_mosaic)
-      ntiles = get_mosaic_ntiles(ocean_mosaic)
-      if(ntiles .NE. 1) call error_mesg('ice_model_init', ' ntiles should be 1 for ocean mosaic, contact developer', FATAL)
-      rmask = 0.0
-      call get_grid_comp_area('OCN', 1, rmask, domain=Ice%Domain)
-      rmask = rmask/cell_area
-      do j = jsc, jec
-         do i = isc, iec
-            if(rmask(i,j) == 0.0) cell_area(i,j) = 0.0
+   if(open_file(grid_fileobj, grid_filename, 'read')) then
+
+     if(variable_exists(grid_fileobj, 'wet')) then
+       call read_data(grid_fileobj, "wet",      rmask)
+     else if(variable_exists(grid_fileobj, 'ocn_mosaic_file') ) then ! read from mosaic file
+       call read_data(grid_fileobj, "ocn_mosaic_file", ocn_mosaic_filename)
+       ocn_mosaic_filename = "INPUT/"//trim(ocn_mosaic_filename)
+
+       if(open_file(ocn_mosaic_fileobj, ocn_mosaic_filename, 'read')) then
+         ntiles = get_mosaic_ntiles(ocn_mosaic_fileobj)
+         if(ntiles .NE. 1) call error_mesg('ice_model_init', ' ntiles should be 1 for ocean mosaic, contact developer', FATAL)
+         rmask = 0.0
+         call get_grid_comp_area('OCN', 1, rmask, domain=Ice%Domain)
+         rmask = rmask/cell_area
+         do j = jsc, jec
+            do i = isc, iec
+               if(rmask(i,j) == 0.0) cell_area(i,j) = 0.0
+            end do
          end do
-      end do
+       else
+         call error_mesg("ice_model_init", "ocn_mosaic_file:"//trim(ocn_mosaic_filename)//"not found", FATAL)
+       endif
+
+     else
+       call error_mesg('ice_model_init','wet and ocn_mosaic_file does not exist in file '//trim(grid_filename), FATAL )
+     end if
+
    else
-      call error_mesg('ice_model_init','wet and ocn_mosaic_file does not exist in file '//trim(grid_file), FATAL )
+     call error_mesg("ice_model_init", "grid file: "//trim(grid_filename)//" not found", FATAL)
    end if
 
     !--- xb and yb is for diagnostics --------------------------------------
@@ -477,7 +471,7 @@ contains
    call mpp_global_field(Ice%Domain, tmp_2d, tmpy, flags=YUPDATE, position=CORNER)
    yb = tmpy(isc,:)
    deallocate(tmpy, tmp_2d)
-   call mpp_set_domain_symmetry(Ice%Domain, .FALSE.)   
+   call mpp_set_domain_symmetry(Ice%Domain, .FALSE.)
 
     !--- define the ice data -----------------------------------------------
    Ice%lon = Ice%lon*pi/180.
@@ -588,96 +582,30 @@ Ice%flux_salt = 0.0
 Ice%area = cell_area  * 4*PI*RADIUS*RADIUS
 Ice%mi   = 0.0
 
+  !     ---- initialize with no ice
+  Ice%temp      = tfreeze + temp_ice_freeze
+  Ice%thickness = 0.0
+  Ice%part_size         = 0.0
+  Ice%part_size (:,:,1) = 1.0
+  Ice%albedo     = 0.14
+  ! initialize ocean values - ice values initialized below
+  Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
+  Ice%rough_mom  = 0.0004
+  Ice%rough_heat = 0.0004
+  Ice%rough_moist= 0.0004
+  Ice%u_surf     = 0.0
+  Ice%v_surf     = 0.0
+  Ice%frazil     = 0.0
 
-    !-----------------------------------------------------------------------
-    !  -------- read restart --------
-!if (do_netcdf_restart) call ice_register_restart(Ice, 'ice_model.res.nc')
+  !     --- open water roughness (initially fixed) ---
 
-if (file_exist('INPUT/ice_model.res.nc') ) then
-  !if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-  !         'Reading NetCDF formatted restart file: INPUT/ice_model.res.nc', NOTE)
-   call restore_state(Ice_restart)
+  call fixed_ocean_roughness ( Ice%mask, Ice%rough_mom  (:,:,1), &
+  Ice%rough_heat (:,:,1), &
+  Ice%rough_moist(:,:,1)  )
 
-   if (.not. query_initialized(Ice_restart, id_restart_albedo)) then
-      if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-                'Initializing diffuse and direct streams to albedo', NOTE)
-    ! initialize ocean values - ice values initialized below
-      Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
-   endif
-
-else
-    if (file_exist('INPUT/ice_model.res')) then
-       if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-            'Reading native formatted restart file.', NOTE)
-
-       unit = open_restart_file ('INPUT/ice_model.res', 'read')
-
-       read  (unit) control
-
-       ! must use correct restart version with native format
-       if (trim(control) /= trim(restart_format)) call error_mesg &
-            ('ice_model_init', 'invalid restart format', FATAL)
-
-       read  (unit) mlon, mlat, npart
-
-       !     ---- restart resolution must be consistent with input args ---
-       if (mlon /= nlon .or. mlat /= nlat .or. npart /= 2)  &
-            call error_mesg ('ice_model_init',           &
-            'incorrect resolution on restart', FATAL)
-
-       call read_data ( unit, Ice%part_size  )
-       call read_data ( unit, Ice%temp       )
-       call read_data ( unit, Ice%thickness  )
-       call read_data ( unit, Ice%albedo     )
-
-       call read_data ( unit, Ice%albedo_vis_dir )
-       call read_data ( unit, Ice%albedo_nir_dir )
-       call read_data ( unit, Ice%albedo_vis_dif )
-       call read_data ( unit, Ice%albedo_nir_dif )
-
-       call read_data ( unit, Ice%rough_mom  )
-       call read_data ( unit, Ice%rough_heat )
-       call read_data ( unit, Ice%rough_moist)
-       call read_data ( unit, Ice%u_surf     )
-       call read_data ( unit, Ice%v_surf     )
-       call read_data ( unit, Ice%frazil     )
-       call read_data ( unit, Ice%flux_u_bot )
-       call read_data ( unit, Ice%flux_v_bot )
-
-       call close_file (unit)
-
-    else
-
-       !     ----- no restart - no ice -----
-
-       Ice%temp      = tfreeze + temp_ice_freeze
-       Ice%thickness = 0.0
-       Ice%part_size         = 0.0
-       Ice%part_size (:,:,1) = 1.0
-       Ice%albedo     = 0.14
-     ! initialize ocean values - ice values initialized below
-       Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
-       Ice%rough_mom  = 0.0004
-       Ice%rough_heat = 0.0004
-       Ice%rough_moist= 0.0004
-       Ice%u_surf     = 0.0
-       Ice%v_surf     = 0.0
-       Ice%frazil     = 0.0
-
-       !     --- open water roughness (initially fixed) ---
-
-       call fixed_ocean_roughness ( Ice%mask, Ice%rough_mom  (:,:,1), &
-            Ice%rough_heat (:,:,1), &
-            Ice%rough_moist(:,:,1)  )
-
-    endif
-endif
 
 !! set ice partiton values to that of Ice%albedo.
    Ice%albedo_vis_dir(:,:,2) = Ice%albedo(:,:,2)
@@ -721,11 +649,10 @@ endif
     iceClock = mpp_clock_id( 'Ice', flags=clock_flag_default, grain=CLOCK_COMPONENT )
     iceClock1 = mpp_clock_id( 'Ice: bot to top', flags=clock_flag_default, grain=CLOCK_ROUTINE )
     iceClock3 = mpp_clock_id( 'Ice: update fast', flags=clock_flag_default, grain=CLOCK_ROUTINE )
- 
+
 
     !--- release the memory ------------------------------------------------
     deallocate(lonv, latv, glon, glat, rmask, xb, yb )
-    call nullify_domain()
 
     module_is_initialized = .true.
 
@@ -793,7 +720,7 @@ subroutine ice_data_type_chksum(id, timestep, data_type)
     character(len=*), intent(in) :: id
     integer         , intent(in) :: timestep
     type(ice_data_type), intent(in) :: data_type
-    
+
     return
 end subroutine ice_data_type_chksum
 
@@ -804,7 +731,7 @@ subroutine ocn_ice_bnd_type_chksum(id, timestep, bnd_type)
     character(len=*), intent(in) :: id
     integer         , intent(in) :: timestep
     type(ocean_ice_boundary_type), intent(in) :: bnd_type
-    
+
     return
 end subroutine ocn_ice_bnd_type_chksum
 
@@ -814,7 +741,7 @@ subroutine atm_ice_bnd_type_chksum(id, timestep, bnd_type)
     character(len=*), intent(in) :: id
     integer         , intent(in) :: timestep
     type(atmos_ice_boundary_type), intent(in) :: bnd_type
-    
+
     return
 end subroutine atm_ice_bnd_type_chksum
 !=============================================================================================
@@ -823,7 +750,7 @@ subroutine lnd_ice_bnd_type_chksum(id, timestep, bnd_type)
     character(len=*), intent(in) :: id
     integer         , intent(in) :: timestep
     type(land_ice_boundary_type), intent(in) :: bnd_type
-    
+
     return
 end subroutine lnd_ice_bnd_type_chksum
 !=============================================================================================
@@ -924,7 +851,7 @@ subroutine unpack_land_ice_boundary(Ice, LIB)
 end subroutine unpack_land_ice_boundary
 !=============================================================================================
 !\brief: dummy version of ice_sis routine that is called by the new interfaces,
-!! but is not used by ice_null. 
+!! but is not used by ice_null.
  subroutine ice_bottom_to_ice_top(Ice, t_surf_ice_bot, u_surf_ice_bot, v_surf_ice_bot, &
                                     frazil_ice_bot, Ocean_ice_boundary, s_surf_ice_bot, sea_lev_ice_bot )
     type (ice_data_type),                    intent(inout) :: Ice
