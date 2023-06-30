@@ -26,8 +26,8 @@ use ocean_albedo_mod, only:  compute_ocean_albedo_new
 
 use  ocean_rough_mod, only:  compute_ocean_roughness, fixed_ocean_roughness
 
-use fms2_io_mod, only : file_exists, open_file, close_file, write_restart, read_data, &
-                        variable_exists, FmsNetcdfDomainFile_t,FmsNetcdfFile_t, read_new_restart 
+use fms2_io_mod, only : open_file, close_file, read_data, &
+                        variable_exists,FmsNetcdfFile_t
 
 use          fms_mod, only: mpp_pe, mpp_root_pe, mpp_npes, write_version_number, stdlog,   &
                             error_mesg, FATAL, check_nml_error, &
@@ -299,10 +299,7 @@ real, parameter :: latent = hlv + hlf
 !type(amip_interp_type), save :: Amip
 real, allocatable, dimension(:,:) ::  cell_area  ! grid cell area; sphere frac.
 
-integer :: id_restart_albedo
 integer :: mlon, mlat, npart ! global grid size
-type(FmsNetcdfDomainFile_t), save :: Ice_restart
-character(len=8) :: dim_names(4)
 
 ! interface for fast ice for compatibility with SIS2
 interface update_ice_model_fast ! overload to support old interface
@@ -585,98 +582,30 @@ Ice%flux_salt = 0.0
 Ice%area = cell_area  * 4*PI*RADIUS*RADIUS
 Ice%mi   = 0.0
 
+  !     ---- initialize with no ice
+  Ice%temp      = tfreeze + temp_ice_freeze
+  Ice%thickness = 0.0
+  Ice%part_size         = 0.0
+  Ice%part_size (:,:,1) = 1.0
+  Ice%albedo     = 0.14
+  ! initialize ocean values - ice values initialized below
+  Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
+  Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
+  Ice%rough_mom  = 0.0004
+  Ice%rough_heat = 0.0004
+  Ice%rough_moist= 0.0004
+  Ice%u_surf     = 0.0
+  Ice%v_surf     = 0.0
+  Ice%frazil     = 0.0
 
-    !-----------------------------------------------------------------------
-    !  -------- read restart --------
-!if (do_netcdf_restart) call ice_register_restart(Ice, 'ice_model.res.nc')
+  !     --- open water roughness (initially fixed) ---
 
-if (open_file(Ice_restart, "INPUT/ice_model.res.nc", 'read', Ice%domain)) then
-  !if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-  !         'Reading NetCDF formatted restart file: INPUT/ice_model.res.nc', NOTE)
+  call fixed_ocean_roughness ( Ice%mask, Ice%rough_mom  (:,:,1), &
+  Ice%rough_heat (:,:,1), &
+  Ice%rough_moist(:,:,1)  )
 
-   call read_new_restart(Ice_restart)
-
-   ! have to double check variable name, before id_restart_albedo was passed in uninitialized
-   if (variable_exists(Ice_restart, "albedo")) then
-      if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-                'Initializing diffuse and direct streams to albedo', NOTE)
-    ! initialize ocean values - ice values initialized below
-      Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
-      Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
-   endif
-
-else
-    if (file_exists('INPUT/ice_model.res')) then
-       if (mpp_pe() == mpp_root_pe()) call error_mesg ('ice_model_mod', &
-            'Reading native formatted restart file.', NOTE)
-
-       open(newunit=unit, file='INPUT/ice_model.res')
-
-       read (unit) control
-
-       ! must use correct restart version with native format
-       if (trim(control) /= trim(restart_format)) call error_mesg &
-            ('ice_model_init', 'invalid restart format', FATAL)
-
-       read  (unit) mlon, mlat, npart
-
-       !     ---- restart resolution must be consistent with input args ---
-       if (mlon /= nlon .or. mlat /= nlat .or. npart /= 2)  &
-            call error_mesg ('ice_model_init',           &
-            'incorrect resolution on restart', FATAL)
-
-       read(unit) Ice%part_size
-       read(unit) Ice%temp
-       read(unit) Ice%thickness
-       read(unit) Ice%albedo
-
-       read(unit) Ice%albedo_vis_dir
-       read(unit) Ice%albedo_nir_dir
-       read(unit) Ice%albedo_vis_dif
-       read(unit) Ice%albedo_nir_dif
-
-       read(unit) Ice%rough_mom
-       read(unit) Ice%rough_heat
-       read(unit) Ice%rough_moist
-       read(unit) Ice%u_surf
-       read(unit) Ice%v_surf
-       read(unit) Ice%frazil
-       read(unit) Ice%flux_u_bot
-       read(unit) Ice%flux_v_bot
-
-       close(unit)
-
-    else
-
-       !     ----- no restart - no ice -----
-
-       Ice%temp      = tfreeze + temp_ice_freeze
-       Ice%thickness = 0.0
-       Ice%part_size         = 0.0
-       Ice%part_size (:,:,1) = 1.0
-       Ice%albedo     = 0.14
-     ! initialize ocean values - ice values initialized below
-       Ice%albedo_vis_dir(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_nir_dir(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_vis_dif(:,:,1) = Ice%albedo(:,:,1)
-       Ice%albedo_nir_dif(:,:,1) = Ice%albedo(:,:,1)
-       Ice%rough_mom  = 0.0004
-       Ice%rough_heat = 0.0004
-       Ice%rough_moist= 0.0004
-       Ice%u_surf     = 0.0
-       Ice%v_surf     = 0.0
-       Ice%frazil     = 0.0
-
-       !     --- open water roughness (initially fixed) ---
-
-       call fixed_ocean_roughness ( Ice%mask, Ice%rough_mom  (:,:,1), &
-            Ice%rough_heat (:,:,1), &
-            Ice%rough_moist(:,:,1)  )
-
-    endif
-endif
 
 !! set ice partiton values to that of Ice%albedo.
    Ice%albedo_vis_dir(:,:,2) = Ice%albedo(:,:,2)
