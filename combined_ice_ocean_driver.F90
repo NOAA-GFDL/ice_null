@@ -66,7 +66,7 @@ end subroutine ice_ocean_driver_init
 !! the ice_data_type to advance both the sea-ice (and icebergs) and ocean states
 !! for a time interval coupling_time_step.  The dummy version in SIS1 does nothing.
 subroutine update_slow_ice_and_ocean(CS, Ice, Ocn, Ocean_sfc, Ice_ocean_boundary, &
-                               time_start_update, coupling_time_step, OIB)
+                               time_start_update, coupling_time_step)
   type(ice_ocean_driver_type), &
                            pointer       :: CS   !< The control structure for this driver
   type(ice_data_type),     intent(inout) :: Ice  !< The publicly visible ice data type
@@ -78,9 +78,6 @@ subroutine update_slow_ice_and_ocean(CS, Ice, Ocn, Ocean_sfc, Ice_ocean_boundary
   type(time_type),         intent(in)    :: time_start_update  !< The time at the beginning of the update step
   type(time_type),         intent(in)    :: coupling_time_step !< The amount of time over which to advance
                                                                !! the ocean and ice
-  type(ocean_ice_boundary_type), optional, &
-                           intent(inout) :: OIB !< A structure containing information about
-                                                !! the ocean that is being shared wth the sea-ice.
 
   call error_mesg("update_slow_ice_and_ocean", &
         "update_slow_ice_and_ocean called in SIS1.  The dummy version of "// &
