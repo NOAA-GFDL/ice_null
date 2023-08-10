@@ -38,6 +38,10 @@ type, public :: ice_ocean_driver_type ; private
   logical :: CS_is_initialized = .false.
 end type ice_ocean_driver_type
 
+!> dummy type to pass compilation
+type, public :: ocean_ice_boundary_type
+end type
+
 contains
 
 !>   This subroutine initializes the combined ice ocean coupling control type.
