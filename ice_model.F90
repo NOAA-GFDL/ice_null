@@ -74,6 +74,7 @@ public :: update_ice_atm_deposition_flux, share_ice_domains
 public :: unpack_ocean_ice_boundary, exchange_slow_to_fast_ice, set_ice_surface_fields
 public :: ice_model_fast_cleanup, unpack_land_ice_boundary
 public :: exchange_fast_to_slow_ice, update_ice_model_slow
+public :: unpack_ocean_ice_boundary_calved_shelf_bergs
 
 type ice_data_type
   type(domain2d)                        :: Domain
@@ -193,7 +194,9 @@ type :: ocean_ice_boundary_type
                                      t =>NULL(), &
                                      s =>NULL(), &
                                      frazil =>NULL(), &
-                                     sea_level =>NULL()
+                                     sea_level =>NULL(), &
+                                     calving =>NULL(), &
+                                     calving_hflx =>NULL()
   real, dimension(:,:,:), pointer :: data =>NULL()
   integer                         :: xtype
   type(coupler_2d_bc_type)        :: fields     ! array of fields used for additional tracers
@@ -772,6 +775,11 @@ end subroutine exchange_slow_to_fast_ice
 subroutine exchange_fast_to_slow_ice(Ice)
   type(ice_data_type), intent(in) :: Ice
 end subroutine exchange_fast_to_slow_ice
+!=============================================================================================
+subroutine unpack_ocean_ice_boundary_calved_shelf_bergs(Ice, Ocean_boundary)
+  type(ice_data_type), intent(in) :: Ice
+  type(ocean_ice_boundary_type), intent(in) :: Ocean_boundary
+end subroutine unpack_ocean_ice_boundary_calved_shelf_bergs
 !=============================================================================================
 subroutine set_ice_surface_fields(Ice)
   type(ice_data_type), intent(inout) :: Ice
