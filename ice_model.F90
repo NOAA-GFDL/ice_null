@@ -159,6 +159,7 @@ type ice_data_type
                                            area_berg =>NULL(), &
                                            mass_berg =>NULL(), &
                                            runoff_hflx =>NULL(), &
+                                           runoff_carbon =>NULL(), &
                                            calving_hflx =>NULL(), &
                                            area =>NULL(), &
                                            flux_salt =>NULL()
@@ -229,8 +230,9 @@ end type atmos_ice_boundary_type
 
 type :: land_ice_boundary_type
   real, dimension(:,:),   pointer :: runoff =>NULL(), &
-                                     calving =>NULL(), &
                                      runoff_hflx =>NULL(), &
+                                     runoff_carbon =>NULL(), &
+                                     calving =>NULL(), &
                                      calving_hflx =>NULL()
   real, dimension(:,:,:), pointer :: data =>NULL()
   integer :: xtype
@@ -550,6 +552,7 @@ contains
                Ice%runoff    (isc:iec, jsc:jec) , &
                Ice%calving   (isc:iec, jsc:jec) , &
              Ice%runoff_hflx (isc:iec, jsc:jec) , &
+             Ice%runoff_carbon (isc:iec, jsc:jec) , &
              Ice%calving_hflx(isc:iec, jsc:jec) , &
              Ice%area        (isc:iec, jsc:jec) , &
              Ice%mi          (isc:iec, jsc:jec) , &
@@ -574,6 +577,7 @@ Ice%p_surf = 0.0
 Ice%runoff = 0.0
 Ice%calving = 0.0
 Ice%runoff_hflx = 0.0
+Ice%runoff_carbon = 0.0
 Ice%calving_hflx = 0.0
 Ice%area = 0.0
 Ice%mi = 0.0
